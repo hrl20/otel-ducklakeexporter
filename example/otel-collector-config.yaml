@@ -1,0 +1,113 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 10s
+    send_batch_size: 1000
+
+  resource:
+    attributes:
+      - key: deployment.environment
+        value: development
+        action: insert
+
+exporters:
+  # DuckLake exporter - Local filesystem storage
+  ducklake:
+    postgresql:
+      host: postgres
+      port: 5432
+      database: ducklake
+      username: otel
+      password: ${env:POSTGRES_PASSWORD}
+      ssl_mode: disable
+      max_open_conns: 25
+      max_idle_conns: 5
+      conn_max_lifetime: 5m
+
+    ducklake:
+      # Local filesystem path
+      output_path: /var/lib/ducklake/data
+      logs_table_name: otel_logs
+      traces_table_name: otel_traces
+
+    parquet:
+      batch_size: 10000
+      batch_timeout: 5m
+      compression: SNAPPY  # Options: SNAPPY, GZIP, ZSTD, UNCOMPRESSED
+      enable_bloom_filters: true  # Bloom filters for trace_id and span_id
+
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 30s
+      max_elapsed_time: 5m
+
+    sending_queue:
+      enabled: true
+      num_consumers: 1  # Single consumer is sufficient (push operation is fast, just appends to batch)
+      queue_size: 1000
+
+  # DuckLake exporter - S3 storage (alternative configuration)
+  # Uncomment to use S3 instead of local filesystem
+  # ducklake_s3:
+  #   postgresql:
+  #     host: postgres
+  #     port: 5432
+  #     database: ducklake
+  #     username: otel
+  #     password: ${env:POSTGRES_PASSWORD}
+  #     ssl_mode: disable
+  #
+  #   ducklake:
+  #     # S3 path - automatically detected and uses memory-based uploads
+  #     # Supports multipart upload for large files (up to 5TB)
+  #     output_path: s3://my-bucket/ducklake-data
+  #
+  #     # Optional S3 settings (uses AWS credential chain by default)
+  #     s3_region: us-east-1              # AWS region (default: us-east-1)
+  #     # s3_endpoint: https://s3.amazonaws.com  # Custom endpoint for S3-compatible services
+  #     # s3_force_path_style: false      # Force path-style addressing (for MinIO, etc.)
+  #     # s3_role_arn: arn:aws:iam::...   # IAM role to assume
+  #
+  #     logs_table_name: otel_logs
+  #     traces_table_name: otel_traces
+  #
+  #   parquet:
+  #     batch_size: 10000
+  #     batch_timeout: 5m
+  #     compression: SNAPPY
+  #     enable_bloom_filters: true
+
+  # Also export to console for debugging
+  debug:
+    verbosity: detailed
+
+service:
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      address: 0.0.0.0:8888
+
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [batch, resource]
+      exporters: [ducklake, debug]
+
+    traces:
+      receivers: [otlp]
+      processors: [batch, resource]
+      exporters: [ducklake, debug]
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133

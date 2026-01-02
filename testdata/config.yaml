@@ -1,0 +1,18 @@
+exporters:
+  ducklake:
+    postgresql:
+      host: localhost
+      port: 5432
+      database: ducklake_test
+      username: test
+      password: test
+      ssl_mode: disable
+    parquet:
+      batch_size: 100
+      batch_timeout: 1s
+      compression: SNAPPY
+      enable_bloom_filters: true
+    ducklake:
+      output_path: /tmp/ducklake_test
+      logs_table_name: test_logs
+      traces_table_name: test_traces

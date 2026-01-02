@@ -1,0 +1,12 @@
+type: ducklake
+
+status:
+  class: exporter
+  stability:
+    alpha: [logs, traces]
+  distributions: [contrib]
+  codeowners:
+    active: []
+
+tests:
+  config:
