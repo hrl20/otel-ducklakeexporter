@@ -299,7 +299,6 @@ parquet:
 
 - **SNAPPY** (default): Balanced compression ratio and speed
 - **ZSTD**: Better compression, slower writes
-- **GZIP**: Good compression, moderate speed
 - **UNCOMPRESSED**: Fastest writes, largest files
 
 ### PostgreSQL Connection Pooling
@@ -307,8 +306,8 @@ parquet:
 For high-throughput scenarios:
 ```yaml
 postgresql:
-  max_open_conns: 50
-  max_idle_conns: 10
+  max_open_conns: 10
+  max_idle_conns: 5
   conn_max_lifetime: 10m
 ```
 
