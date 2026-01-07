@@ -283,11 +283,9 @@ func (mw *MetadataWriter) ensureColumns(ctx context.Context, tx *sql.Tx, tableID
 			zap.Int64("column_id", columnID))
 	}
 
-	// If we created columns, ensure column mapping exists
-	if createdAny {
-		if err := mw.ensureColumnMapping(ctx, tx, tableID, columnIDs); err != nil {
-			return nil, false, fmt.Errorf("failed to ensure column mapping: %w", err)
-		}
+	// Ensure column mapping exists (loads mapping_id if it already exists)
+	if err := mw.ensureColumnMapping(ctx, tx, tableID, columnIDs); err != nil {
+		return nil, false, fmt.Errorf("failed to ensure column mapping: %w", err)
 	}
 
 	return columnIDs, createdAny, nil

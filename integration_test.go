@@ -811,3 +811,94 @@ func TestIntegration_MultipleFlushes(t *testing.T) {
 
 	t.Logf("Multiple flushes test passed: %d total records, %d snapshots", totalRecords, snapshotCount)
 }
+
+// TestIntegration_MappingIDRegression tests that mapping_id is correctly loaded
+// on subsequent runs when columns already exist. This is a regression test for
+// a bug where mapping_id was set to 0 when the metadata writer didn't create
+// new columns (on the second run).
+func TestIntegration_MappingIDRegression(t *testing.T) {
+	tc := setupIntegrationTest(t)
+	defer tc.cleanup(t)
+
+	ctx := context.Background()
+
+	// First run: Create exporter and write initial logs (creates schema, table, columns, mapping)
+	tc.createExporter(t)
+	logs1 := generateTestLogs(50)
+	err := tc.exporter.pushLogsData(ctx, logs1)
+	require.NoError(t, err)
+
+	// Shutdown first exporter to flush data
+	err = tc.exporter.shutdown(ctx)
+	require.NoError(t, err)
+	tc.exporter = nil
+
+	// Connect to database to verify first batch
+	dsn := fmt.Sprintf("host=%s port=%s dbname=ducklake_test user=test password=test sslmode=disable",
+		tc.pgHost, tc.pgPort)
+	db, err := sql.Open("postgres", dsn)
+	require.NoError(t, err)
+	defer db.Close()
+
+	// Verify first batch has non-zero mapping_id
+	var firstBatchMappingID int64
+	err = db.QueryRowContext(ctx, `
+		SELECT mapping_id
+		FROM public.ducklake_data_file
+		ORDER BY data_file_id ASC
+		LIMIT 1
+	`).Scan(&firstBatchMappingID)
+	require.NoError(t, err)
+	assert.NotEqual(t, int64(0), firstBatchMappingID, "First batch mapping_id should not be 0")
+
+	// Second run: Create a new exporter (fresh metadata writer instance)
+	// This simulates a restart where columns already exist
+	tc.createExporter(t)
+	logs2 := generateTestLogs(50)
+	err = tc.exporter.pushLogsData(ctx, logs2)
+	require.NoError(t, err)
+
+	// Shutdown second exporter to flush data
+	err = tc.exporter.shutdown(ctx)
+	require.NoError(t, err)
+	tc.exporter = nil
+
+	// Verify all data files have non-zero mapping_id
+	rows, err := db.QueryContext(ctx, `
+		SELECT data_file_id, mapping_id
+		FROM public.ducklake_data_file
+		ORDER BY data_file_id ASC
+	`)
+	require.NoError(t, err)
+	defer rows.Close()
+
+	var dataFileCount int
+	var zeroMappingIDCount int
+	for rows.Next() {
+		var dataFileID, mappingID int64
+		err = rows.Scan(&dataFileID, &mappingID)
+		require.NoError(t, err)
+		dataFileCount++
+
+		if mappingID == 0 {
+			zeroMappingIDCount++
+			t.Errorf("Data file %d has mapping_id = 0 (expected non-zero)", dataFileID)
+		}
+	}
+	require.NoError(t, rows.Err())
+
+	assert.Greater(t, dataFileCount, 1, "Should have multiple data files from both batches")
+	assert.Equalf(t, 0, zeroMappingIDCount, "Expected 0 files with mapping_id = 0, got %d", zeroMappingIDCount)
+
+	// Verify all mapping_ids are the same (should reuse the same mapping)
+	var distinctMappingIDs int
+	err = db.QueryRowContext(ctx, `
+		SELECT COUNT(DISTINCT mapping_id)
+		FROM public.ducklake_data_file
+	`).Scan(&distinctMappingIDs)
+	require.NoError(t, err)
+	assert.Equal(t, 1, distinctMappingIDs, "Expected 1 distinct mapping_id, got %d", distinctMappingIDs)
+
+	t.Logf("Mapping ID regression test passed: %d data files, all with non-zero mapping_id = %d",
+		dataFileCount, firstBatchMappingID)
+}
